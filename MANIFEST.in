@@ -1,0 +1,4 @@
+include README.md
+include pyproject.toml
+recursive-exclude universal_rag.egg-info *
+recursive-exclude tests *

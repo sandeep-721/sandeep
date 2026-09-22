@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "universal-rag": {
+      "command": "cmd.exe",
+      "args": ["/c", "server\\mcp_launcher.cmd"]
+    }
+  }
+}
