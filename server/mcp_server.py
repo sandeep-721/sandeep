@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("Universal RAG")
 
 API_URL = os.getenv("UNIVERSAL_RAG_API_URL", "http://127.0.0.1:8000").rstrip("/")
+API_KEY = os.getenv("UNIVERSAL_RAG_API_KEY")
 
 
 @mcp.tool()
@@ -33,9 +34,14 @@ def search(
         "human_language": human_language,
     }
 
+    headers = {}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+
     response = httpx.post(
         f"{API_URL}/search",
         json=payload,
+        headers=headers,
         timeout=120.0,
     )
     response.raise_for_status()

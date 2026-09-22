@@ -1,3 +1,4 @@
+import os
 import sys
 
 import pytest
@@ -7,9 +8,13 @@ from mcp.client.stdio import stdio_client
 
 @pytest.mark.anyio
 async def test_mcp_search():
+    env = os.environ.copy()
+    env["UNIVERSAL_RAG_API_KEY"] = "test-production-key"
+
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "server.mcp_server"],
+        env=env,
     )
 
     async with stdio_client(server) as (read, write):
