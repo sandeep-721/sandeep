@@ -1,0 +1,6 @@
+{
+  "provider": "local_transformers",
+  "model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "base_url": null,
+  "api_key_env": "UNIVERSAL_RAG_LLM_API_KEY"
+}

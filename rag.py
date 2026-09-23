@@ -1,4 +1,4 @@
-from dotenv import load_dotenv
+﻿from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from retrieval.hybrid_search import HybridSearch
 from generation.context_builder import ContextBuilder
-from generation.llm import LocalLLM
+from generation.provider_manager import LLMProviderManager
 from retrieval.vector_store import VectorStore
 
 
@@ -30,22 +30,22 @@ class RAG:
             max_chars=max_context_chars
         )
 
-        self.llm = LocalLLM()
+        self.llm = LLMProviderManager()
 
         self.candidate_limit = candidate_limit
         self.result_limit = result_limit
 
-    def ask(self, question):
+    def ask(self, question, project=None):
         search_kwargs = {
             "query": question,
             "limit": self.result_limit,
             "candidate_limit": self.candidate_limit,
         }
 
-        if self.project_root:
-            search_kwargs["project"] = (
-                self.project_root.name
-            )
+        if project:
+            search_kwargs["project"] = project
+        elif self.project_root:
+            search_kwargs["project"] = self.project_root.name
 
         results = self.search.search(
             **search_kwargs
@@ -98,8 +98,8 @@ class RAG:
             "6. Never invent code, methods, fields, classes, "
             "control flow, behavior, or implementation details.\n"
             "7. Do not turn a method name into an explanation "
-            "of its behavior unless the evidence shows that "
-            "behavior.\n"
+            "of its behavior unless the evidence shows "
+            "that behavior.\n"
             "8. Do not claim that something is guaranteed, "
             "correct, efficient, dynamic, safe, reusable, "
             "or suitable unless the evidence explicitly "
@@ -134,7 +134,7 @@ class RAG:
 
         answer = self.llm.generate(
             prompt=prompt,
-            max_new_tokens=600,
+            max_new_tokens=128,
             temperature=0.05,
         )
 

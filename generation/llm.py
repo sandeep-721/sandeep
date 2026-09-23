@@ -1,130 +1,140 @@
-import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-)
+﻿import os
+
+from .providers.base import LLMProvider
+from .providers.local_transformers import TransformersLocalProvider
+from .providers.ollama import OllamaProvider
+from .providers.openai_compatible import OpenAICompatibleProvider
+from config.llm_config import load_llm_config
 
 
-class LocalLLM:
-    MODEL_NAME = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+DEFAULT_PROVIDER = "local_transformers"
 
-    def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.MODEL_NAME
+DEFAULT_MODELS = {
+    "openai": "gpt-5.6-luna",
+    "ollama": "qwen3",
+    "openrouter": "",
+    "lmstudio": "",
+    "vllm": "",
+    "openai_compatible": "",
+    "custom": "",
+}
+
+
+def create_llm_provider(
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> LLMProvider:
+    """
+    Create a Universal-RAG LLM provider.
+
+    Explicit arguments have priority over environment variables
+    and saved configuration. This allows the application to test
+    temporary provider settings without changing the saved config.
+    """
+
+    config = load_llm_config()
+
+    provider_name = (
+        provider
+        or os.getenv("UNIVERSAL_RAG_LLM_PROVIDER")
+        or config.provider
+        or DEFAULT_PROVIDER
+    ).strip().lower()
+
+    configured_model = (
+        model
+        or os.getenv("UNIVERSAL_RAG_LLM_MODEL")
+        or config.model
+        or DEFAULT_MODELS.get(provider_name, "")
+    ).strip()
+
+    configured_base_url = (
+        base_url
+        or os.getenv("UNIVERSAL_RAG_LLM_BASE_URL")
+        or config.base_url
+    )
+
+    configured_api_key = (
+        api_key
+        if api_key is not None
+        else (
+            os.getenv("UNIVERSAL_RAG_LLM_API_KEY")
+            or config.api_key
+        )
+    )
+
+    if provider_name in {
+        "local",
+        "local_transformers",
+        "transformers",
+        "huggingface",
+    }:
+        return TransformersLocalProvider(
+            model_name=(
+                configured_model
+                or TransformersLocalProvider.DEFAULT_MODEL
+            )
         )
 
-        if self.device == "cuda":
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
+    if provider_name == "ollama":
+        if not configured_model:
+            raise ValueError(
+                "A model must be configured for the Ollama provider."
             )
 
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.MODEL_NAME,
-                quantization_config=quantization_config,
-                device_map="auto",
-            )
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.MODEL_NAME
-            )
-
-            self.model.to(self.device)
-
-        self.model.eval()
-
-    def generate(
-        self,
-        prompt,
-        max_new_tokens=512,
-        temperature=0.1,
-    ):
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict evidence-grounded technical "
-                    "assistant.\n\n"
-
-                    "Your answer must be based ONLY on the supplied "
-                    "project evidence.\n\n"
-
-                    "Rules:\n"
-                    "1. Never invent implementation details.\n"
-                    "2. Never infer behavior that is not explicitly "
-                    "supported by the evidence.\n"
-                    "3. Do not use outside knowledge.\n"
-                    "4. If the evidence does not establish a fact, "
-                    "say that the indexed project evidence does not "
-                    "confirm it.\n"
-                    "5. Every important technical claim must include "
-                    "one or more evidence references such as [E1] "
-                    "or [E2].\n"
-                    "6. Evidence references must correspond to the "
-                    "provided evidence blocks.\n"
-                    "7. Do not create evidence references that do "
-                    "not exist.\n"
-                    "8. Distinguish clearly between what the source "
-                    "code contains and what it does not establish.\n"
-                    "9. Do not use words such as 'likely', "
-                    "'probably', 'appears', or 'presumably' to fill "
-                    "missing information.\n"
-                    "10. If multiple sources support a claim, cite "
-                    "all relevant evidence references.\n\n"
-
-                    "Answer concisely and technically."
-                ),
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ]
-
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
+        return OllamaProvider(
+            model_name=configured_model,
+            base_url=(
+                configured_base_url
+                or OllamaProvider.DEFAULT_BASE_URL
+            ),
         )
 
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-        )
+    if provider_name in {
+        "openai",
+        "openrouter",
+        "lmstudio",
+        "vllm",
+        "openai_compatible",
+        "custom",
+    }:
+        if not configured_model:
+            raise ValueError(
+                "A model must be configured for "
+                f"the {provider_name} provider."
+            )
 
-        inputs = {
-            key: value.to(self.model.device)
-            for key, value in inputs.items()
+        default_base_urls = {
+            "openai": "https://api.openai.com/v1",
+            "openrouter": "https://openrouter.ai/api/v1",
+            "lmstudio": "http://127.0.0.1:1234/v1",
+            "vllm": "http://127.0.0.1:8000/v1",
         }
 
-        with torch.no_grad():
-            output = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-                pad_token_id=self.tokenizer.eos_token_id,
+        resolved_base_url = (
+            configured_base_url
+            or default_base_urls.get(
+                provider_name,
+                OpenAICompatibleProvider.DEFAULT_BASE_URL,
             )
-
-        generated_tokens = output[
-            0
-        ][inputs["input_ids"].shape[1]:]
-
-        answer = self.tokenizer.decode(
-            generated_tokens,
-            skip_special_tokens=True,
         )
 
-        return answer.strip()
+        return OpenAICompatibleProvider(
+            model_name=configured_model,
+            base_url=resolved_base_url,
+            api_key=configured_api_key,
+        )
 
-    def close(self):
-        if hasattr(self, "model"):
-            del self.model
+    raise ValueError(
+        f"Unsupported LLM provider: {provider_name}. "
+        "Supported providers: local_transformers, "
+        "ollama, openai, openrouter, lmstudio, vllm, "
+        "openai_compatible, custom."
+    )
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+
+# Backward compatibility.
+LocalLLM = TransformersLocalProvider

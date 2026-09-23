@@ -23,3 +23,5 @@ htmlcov/
 dist/
 
 universal_rag.egg-info/
+
+config/llm.json
