@@ -533,6 +533,28 @@ def detect_source_type(
         return "project_test"
 
     # --------------------------------------------------------
+    # Historical / release documentation
+    # --------------------------------------------------------
+
+    historical_names = {
+        "changelog.md",
+        "changes.md",
+        "history.md",
+        "migration.md",
+        "migrations.md",
+        "release_notes.md",
+        "release-notes.md",
+        "roadmap.md",
+        "todo.md",
+    }
+
+    if filename in historical_names:
+        if project_root is not None:
+            return "project_history"
+
+        return "rag_history"
+
+    # --------------------------------------------------------
     # Documentation
     # --------------------------------------------------------
 

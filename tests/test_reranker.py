@@ -1,6 +1,7 @@
 from sentence_transformers import CrossEncoder
 
 from config.settings import RERANKER_MODEL, DEVICE
+from reranking.reranker import Reranker
 
 
 def test_reranker_ranks_relevant_document_higher():
@@ -30,3 +31,35 @@ def test_reranker_ranks_relevant_document_higher():
     )
 
     assert float(scores[0]) > float(scores[1])
+
+
+def test_source_authority_is_history_aware():
+    assert Reranker._source_authority(
+        {"source_type": "project_documentation"}
+    ) > Reranker._source_authority(
+        {"source_type": "project_history"}
+    )
+
+    assert Reranker._source_authority(
+        {"source_type": "project_history"}
+    ) > Reranker._source_authority(
+        {"source_type": "project_test"}
+    )
+
+    assert Reranker._source_authority(
+        {"source_type": "project_configuration"}
+    ) > Reranker._source_authority(
+        {"source_type": "project_code"}
+    )
+
+    assert Reranker._source_authority(
+        {"source_type": "rag_documentation"}
+    ) > Reranker._source_authority(
+        {"source_type": "rag_history"}
+    )
+
+    assert Reranker._source_authority(
+        {"source_type": "third_party_code"}
+    ) < Reranker._source_authority(
+        {"source_type": "project_code"}
+    )

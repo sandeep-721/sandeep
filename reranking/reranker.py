@@ -471,12 +471,35 @@ class Reranker:
     @staticmethod
     def _source_authority(payload: dict) -> float:
         source_type = str(payload.get("source_type", "")).strip().lower()
+
+        # Universal RAG's own sources
         if source_type == "rag_configuration":
             return 1.0
         if source_type == "rag_documentation":
             return 0.75
+        if source_type == "rag_history":
+            return 0.15
         if source_type == "rag_test":
             return -0.50
+
+        # Primary project sources
+        if source_type == "project_configuration":
+            return 0.90
+        if source_type == "project_documentation":
+            return 0.80
+        if source_type == "project_code":
+            return 0.25
+        if source_type == "project_history":
+            return 0.10
+        if source_type == "project_test":
+            return -0.30
+
+        # Third-party / bundled sources
+        if source_type == "third_party_documentation":
+            return -0.05
+        if source_type == "third_party_code":
+            return -0.15
+
         return 0.0
 
     @staticmethod
