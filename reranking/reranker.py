@@ -6,6 +6,7 @@ from config.settings import RERANKER_MODEL, DEVICE
 
 from retrieval.lexical_index import LexicalIndex
 from retrieval.query_intent import QueryIntentDetector
+from retrieval.query_plan import QueryPlan, QueryPlanner
 
 
 
@@ -1181,20 +1182,21 @@ class Reranker:
 
 
     def rerank(
-
         self,
-
         query: str,
-
         documents: list[dict],
-
         limit: int = 5,
-
+        query_plan: QueryPlan | None = None,
     ):
 
         if not documents:
 
             return []
+
+        plan = (
+            query_plan
+            or QueryPlanner.build(query)
+        )
 
 
 
@@ -1291,16 +1293,12 @@ class Reranker:
 
 
         explicit_identifier_query = (
-
-            self._is_explicit_identifier_query(
-
-                query
-
-            )
-
+            plan.explicit_identifier_query
         )
 
 
+
+        query_intent = plan.intent
 
         scored = []
 
@@ -1413,8 +1411,6 @@ class Reranker:
 
 
             structural_score = structural["score"]
-
-            query_intent = self._query_intent(query)
 
 
 

@@ -6,6 +6,7 @@ from embeddings.embedder import Embedder
 
 from retrieval.vector_store import VectorStore
 from retrieval.query_intent import QueryIntentDetector
+from retrieval.query_plan import QueryPlan, QueryPlanner
 
 
 
@@ -572,25 +573,16 @@ class SemanticSearch:
 
 
     def search(
-
         self,
-
         query,
-
         limit=5,
-
         software=None,
-
         software_version=None,
-
         project=None,
-
         content_type=None,
-
         language=None,
-
         human_language=None,
-
+        query_plan: QueryPlan | None = None,
     ):
 
         query_vector = self.embedder.encode_query(
@@ -623,37 +615,14 @@ class SemanticSearch:
 
 
 
-        identifiers = (
-
-            self._extract_identifiers(
-
-                query
-
-            )
-
+        plan = (
+            query_plan
+            or QueryPlanner.build(query)
         )
 
-
-
-        class_candidates = (
-
-            self._extract_class_candidates(
-
-                query
-
-            )
-
-        )
-
-
-
-        query_intent = self._detect_query_intent(
-
-            query
-
-        )
-
-
+        identifiers = plan.identifiers
+        class_candidates = plan.class_candidates
+        query_intent = plan.intent
 
         retrieval_limit = max(
 

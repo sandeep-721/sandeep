@@ -1,5 +1,6 @@
-﻿from retrieval.search import SemanticSearch
+from retrieval.search import SemanticSearch
 from retrieval.vector_store import VectorStore
+from retrieval.query_plan import QueryPlan, QueryPlanner
 from retrieval.sparse_search import SparseSearch
 from reranking.reranker import Reranker
 
@@ -35,16 +36,9 @@ class HybridSearch:
 
     @staticmethod
     def _retrieval_weights(query_intent: str):
-        return {
-            "code": (1.25, 0.75),
-            "test": (1.25, 0.75),
-            "documentation": (0.90, 1.10),
-            "configuration": (0.80, 1.20),
-            "history": (0.85, 1.15),
-            "general": (1.00, 1.00),
-        }.get(
+        return QueryPlanner.RETRIEVAL_WEIGHTS.get(
             query_intent,
-            (1.00, 1.00),
+            QueryPlanner.RETRIEVAL_WEIGHTS["general"],
         )
 
     @staticmethod
@@ -174,7 +168,13 @@ class HybridSearch:
         content_type: str | None = None,
         language: str | None = None,
         human_language: str | None = None,
+        query_plan: QueryPlan | None = None,
     ):
+        plan = (
+            query_plan
+            or QueryPlanner.build(query)
+        )
+
         dense_results = self.dense.search(
             query=query,
             limit=retrieval_limit,
@@ -184,6 +184,7 @@ class HybridSearch:
             content_type=content_type,
             language=language,
             human_language=human_language,
+            query_plan=plan,
         )
 
         sparse_results = self.sparse.search(
@@ -197,9 +198,7 @@ class HybridSearch:
             human_language=human_language,
         )
 
-        query_intent = (
-            self.dense._detect_query_intent(query)
-        )
+        query_intent = plan.intent
 
         candidates = self._fuse_results(
             dense_results=dense_results,
@@ -217,6 +216,7 @@ class HybridSearch:
         return reranked
 
     def close(self):
+
         self.dense.close()
         self.sparse.close()
         self.reranker.close()
