@@ -25,6 +25,9 @@ class Reranker:
 
     SOURCE_AUTHORITY_WEIGHT = 0.20
 
+    SOURCE_DIVERSITY_PENALTY = 0.08
+    SOURCE_DIVERSITY_MAX_REPEATS = 2
+
 
 
     EXACT_SYMBOL_BONUS = 1.50
@@ -1611,9 +1614,110 @@ class Reranker:
 
 
 
-        return scored[:limit]
+        return self._select_source_diverse(
+            scored=scored,
+            limit=limit,
+        )
 
 
+
+    @classmethod
+    def _select_source_diverse(cls, scored, limit):
+        """
+        Softly diversify sources after reranking.
+
+        Repeated chunks from the same source receive a progressive
+        selection penalty. Exact structural matches remain protected.
+        """
+        if not scored or limit <= 0:
+            return []
+
+        remaining = list(scored)
+        selected = []
+        source_counts = {}
+
+        while remaining and len(selected) < limit:
+            best_index = 0
+            best_key = None
+
+            for index, item in enumerate(remaining):
+                payload = item.get("payload") or {}
+                source = (
+                    payload.get("source")
+                    or payload.get("path")
+                    or "<unknown>"
+                )
+
+                repeat_index = source_counts.get(source, 0)
+
+                protected = bool(
+                    item.get("explicit_identifier_query")
+                    and item.get("structural_exact")
+                )
+
+                penalty = 0.0
+                if not protected:
+                    penalty = (
+                        min(
+                            repeat_index,
+                            cls.SOURCE_DIVERSITY_MAX_REPEATS,
+                        )
+                        * cls.SOURCE_DIVERSITY_PENALTY
+                    )
+
+                selection_score = (
+                    float(item.get("final_rerank_score", 0.0))
+                    - penalty
+                )
+
+                key = (
+                    selection_score,
+                    float(item.get("final_rerank_score", 0.0)),
+                    float(item.get("answer_evidence_score", 0.0)),
+                    float(item.get("rerank_normalized_score", 0.0)),
+                )
+
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_index = index
+
+            chosen = remaining.pop(best_index)
+
+            payload = chosen.get("payload") or {}
+            source = (
+                payload.get("source")
+                or payload.get("path")
+                or "<unknown>"
+            )
+
+            repeat_index = source_counts.get(source, 0)
+
+            protected = bool(
+                chosen.get("explicit_identifier_query")
+                and chosen.get("structural_exact")
+            )
+
+            penalty = 0.0
+            if not protected:
+                penalty = (
+                    min(
+                        repeat_index,
+                        cls.SOURCE_DIVERSITY_MAX_REPEATS,
+                    )
+                    * cls.SOURCE_DIVERSITY_PENALTY
+                )
+
+            chosen["source_diversity_penalty"] = float(penalty)
+            chosen["source_repeat_index"] = int(repeat_index)
+            chosen["source_selection_score"] = float(
+                chosen.get("final_rerank_score", 0.0)
+                - penalty
+            )
+
+            selected.append(chosen)
+            source_counts[source] = repeat_index + 1
+
+        return selected
 
     def close(self):
 
