@@ -1,5 +1,11 @@
 from collections import OrderedDict
 
+from generation.evidence_packet import (
+    EvidenceItem,
+    EvidencePacket,
+    EvidenceSource,
+)
+
 
 class ContextBuilder:
     def __init__(self, max_chars=12000):
@@ -214,6 +220,150 @@ class ContextBuilder:
         )
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _score_fields(result):
+        scores = {}
+
+        for key, value in result.items():
+            if "score" not in key.lower():
+                continue
+
+            if isinstance(value, (int, float)):
+                scores[key] = float(value)
+
+        return scores
+
+    @staticmethod
+    def _metadata_fields(payload):
+        keys = (
+            "software",
+            "software_version",
+            "project",
+            "language",
+            "symbol",
+            "symbol_kind",
+            "class_name",
+            "member_name",
+            "member_kind",
+        )
+
+        return {
+            key: payload.get(key)
+            for key in keys
+            if payload.get(key) not in (None, "")
+        }
+
+    def build_packet(self, results, query=""):
+        """
+        Build a structured evidence packet from ranked retrieval results.
+        """
+
+        if not results:
+            return EvidencePacket(
+                query=query,
+                evidence=(),
+                sources=(),
+                max_chars=self.max_chars,
+            )
+
+        results = self._deduplicate_results(results)
+
+        evidence_items = []
+        source_records = OrderedDict()
+        total_chars = 0
+
+        for rank, result in enumerate(results, start=1):
+            payload = result.get("payload", {})
+
+            text = payload.get("text", "")
+            if not text or not text.strip():
+                continue
+
+            expanded_context = (
+                payload.get("expanded_context", "")
+                or text
+            )
+
+            evidence_id = f"E{len(evidence_items) + 1}"
+
+            item = EvidenceItem(
+                evidence_id=evidence_id,
+                rank=rank,
+                source=payload.get("source", "unknown"),
+                file_hash=payload.get("file_hash"),
+                chunk_index=payload.get("chunk_index"),
+                chunk_start=payload.get("chunk_start"),
+                chunk_end=payload.get("chunk_end"),
+                text=text,
+                expanded_context=expanded_context,
+                context_window=int(
+                    payload.get("context_window", 0) or 0
+                ),
+                context_chunks=tuple(
+                    payload.get("context_chunks", []) or []
+                ),
+                metadata=self._metadata_fields(payload),
+                scores=self._score_fields(result),
+            )
+
+            rendered = item.render()
+            projected_size = (
+                total_chars
+                + len(rendered)
+                + 2
+            )
+
+            if projected_size > self.max_chars:
+                break
+
+            evidence_items.append(item)
+            total_chars = projected_size
+
+            source = item.source
+            record = source_records.setdefault(
+                source,
+                {
+                    "evidence_ids": [],
+                    "chunks": set(),
+                    "payload": payload,
+                },
+            )
+
+            record["evidence_ids"].append(evidence_id)
+
+            if item.chunk_index is not None:
+                record["chunks"].add(item.chunk_index)
+
+        sources = []
+
+        for source, record in source_records.items():
+            payload = record["payload"]
+
+            sources.append(
+                EvidenceSource(
+                    source=source,
+                    evidence_ids=tuple(
+                        record["evidence_ids"]
+                    ),
+                    chunks=tuple(
+                        sorted(record["chunks"])
+                    ),
+                    project=payload.get("project"),
+                    software=payload.get("software"),
+                    software_version=payload.get(
+                        "software_version"
+                    ),
+                    language=payload.get("language"),
+                )
+            )
+
+        return EvidencePacket(
+            query=query,
+            evidence=tuple(evidence_items),
+            sources=tuple(sources),
+            max_chars=self.max_chars,
+        )
 
     def build_evidence(self, results):
         """

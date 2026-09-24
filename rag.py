@@ -1,4 +1,4 @@
-﻿from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -62,16 +62,20 @@ class RAG:
                 "results": [],
             }
 
-        evidence_data = (
-            self.context_builder.build_evidence(
-                results
+        evidence_packet = (
+            self.context_builder.build_packet(
+                results,
+                query=question,
             )
         )
 
-        evidence = evidence_data["text"]
-        sources = evidence_data["sources"]
+        evidence = evidence_packet.text
+        sources = [
+            source.to_dict()
+            for source in evidence_packet.sources
+        ]
 
-        if not evidence:
+        if evidence_packet.is_empty():
             return {
                 "answer": (
                     "The indexed project evidence does not "
@@ -79,6 +83,7 @@ class RAG:
                 ),
                 "sources": [],
                 "results": [],
+                "evidence_packet": evidence_packet.to_dict(),
             }
 
         prompt = (
@@ -142,6 +147,7 @@ class RAG:
             "answer": answer.rstrip(),
             "sources": sources,
             "results": results,
+            "evidence_packet": evidence_packet.to_dict(),
         }
 
     def close(self):
