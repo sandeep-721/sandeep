@@ -1,4 +1,4 @@
-from qdrant_client import QdrantClient
+﻿from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -61,6 +61,7 @@ class VectorStore:
         human_language=None,
         file_hash=None,
         source=None,
+        embedding_version=None,
     ):
         """
         Build an optional metadata filter.
@@ -78,6 +79,9 @@ class VectorStore:
             te
             ta
             hi
+
+        `embedding_version` identifies the embedding model/
+        protocol used to create the indexed vector.
         """
 
         conditions = []
@@ -91,6 +95,7 @@ class VectorStore:
             "human_language": human_language,
             "file_hash": file_hash,
             "source": source,
+            "embedding_version": embedding_version,
         }
 
         for field, value in filters.items():
@@ -111,11 +116,16 @@ class VectorStore:
             must=conditions
         )
 
-    def file_exists(self, file_hash):
+    def file_exists(
+        self,
+        file_hash,
+        embedding_version=None,
+    ):
         results = self.client.scroll(
             collection_name=self.collection_name,
             scroll_filter=self.build_filter(
-                file_hash=file_hash
+                file_hash=file_hash,
+                embedding_version=embedding_version,
             ),
             limit=1,
             with_payload=False,

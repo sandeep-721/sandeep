@@ -35,6 +35,7 @@ class DocumentMetadata:
 
     source_type: Optional[str] = None
     source_version: Optional[str] = None
+    embedding_version: Optional[str] = None
 
     tags: list[str] = field(default_factory=list)
 

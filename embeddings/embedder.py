@@ -3,6 +3,11 @@ from sentence_transformers import SentenceTransformer
 from config.settings import EMBEDDING_MODEL, DEVICE
 
 
+# Changes whenever the embedding model or query/document
+# embedding protocol changes.
+EMBEDDING_VERSION = "qwen3-embedding-0.6b-query-document-v1"
+
+
 class Embedder:
     _model = None
 
@@ -15,12 +20,31 @@ class Embedder:
 
         self.model = Embedder._model
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
+    def encode_query(
+        self,
+        queries: list[str],
+    ) -> list[list[float]]:
+        if not queries:
             return []
 
-        embeddings = self.model.encode(
-            texts,
+        embeddings = self.model.encode_query(
+            queries,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+
+        return embeddings.tolist()
+
+    def encode_documents(
+        self,
+        documents: list[str],
+    ) -> list[list[float]]:
+        if not documents:
+            return []
+
+        embeddings = self.model.encode_document(
+            documents,
             normalize_embeddings=True,
             convert_to_numpy=True,
             show_progress_bar=False,

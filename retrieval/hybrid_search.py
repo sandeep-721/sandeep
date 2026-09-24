@@ -34,6 +34,20 @@ class HybridSearch:
         return 1.0 / (k + rank)
 
     @staticmethod
+    def _retrieval_weights(query_intent: str):
+        return {
+            "code": (1.25, 0.75),
+            "test": (1.25, 0.75),
+            "documentation": (0.90, 1.10),
+            "configuration": (0.80, 1.20),
+            "history": (0.85, 1.15),
+            "general": (1.00, 1.00),
+        }.get(
+            query_intent,
+            (1.00, 1.00),
+        )
+
+    @staticmethod
     def _get_result_id(result):
         if isinstance(result, dict):
             return result.get("id")
@@ -54,6 +68,7 @@ class HybridSearch:
         result,
         rank,
         retriever,
+        weight=1.0,
     ):
         point_id = cls._get_result_id(result)
 
@@ -76,7 +91,10 @@ class HybridSearch:
                 "sparse_rrf": 0.0,
             }
 
-        rrf_score = cls._rrf_score(rank)
+        rrf_score = (
+            cls._rrf_score(rank)
+            * weight
+        )
 
         fused[point_id]["score"] += rrf_score
 
@@ -94,16 +112,20 @@ class HybridSearch:
         dense_results,
         sparse_results,
         candidate_limit=DEFAULT_RRF_CANDIDATE_LIMIT,
+        query_intent="general",
     ):
         """
-        Standard chunk-level RRF.
+        Query-adaptive chunk-level RRF.
 
-        Dense and sparse retrieval are fused directly.
-        No source-level aggregation or source-diversity
-        manipulation is performed.
+        The fusion remains transparent RRF, but dense/sparse
+        contributions are slightly reweighted by query intent.
         """
 
         fused = {}
+
+        dense_weight, sparse_weight = (
+            cls._retrieval_weights(query_intent)
+        )
 
         for rank, result in enumerate(
             dense_results,
@@ -114,6 +136,7 @@ class HybridSearch:
                 result=result,
                 rank=rank,
                 retriever="dense",
+                weight=dense_weight,
             )
 
         for rank, result in enumerate(
@@ -125,6 +148,7 @@ class HybridSearch:
                 result=result,
                 rank=rank,
                 retriever="sparse",
+                weight=sparse_weight,
             )
 
         if not fused:
@@ -173,10 +197,15 @@ class HybridSearch:
             human_language=human_language,
         )
 
+        query_intent = (
+            self.dense._detect_query_intent(query)
+        )
+
         candidates = self._fuse_results(
             dense_results=dense_results,
             sparse_results=sparse_results,
             candidate_limit=candidate_limit,
+            query_intent=query_intent,
         )
 
         reranked = self.reranker.rerank(
