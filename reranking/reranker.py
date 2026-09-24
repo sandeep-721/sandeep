@@ -5,6 +5,7 @@ from sentence_transformers import CrossEncoder
 from config.settings import RERANKER_MODEL, DEVICE
 
 from retrieval.lexical_index import LexicalIndex
+from retrieval.query_intent import QueryIntentDetector
 
 
 
@@ -1113,110 +1114,8 @@ class Reranker:
 
 
     @staticmethod
-
     def _query_intent(query: str) -> str:
-
-        normalized = " ".join((query or "").lower().split())
-
-
-
-        if not normalized:
-
-            return "general"
-
-
-
-        if any(term in normalized for term in (
-
-            "which script verifies",
-
-            "which script validates",
-
-            "which script checks",
-
-            "which script asserts",
-
-        )):
-
-            return "code"
-
-
-
-        if any(term in normalized for term in (
-
-            "test", "testing", "benchmark", "regression",
-
-            "evaluation", "validation baseline",
-
-        )):
-
-            return "test"
-
-
-
-        if any(term in normalized for term in (
-
-            "configuration", "configured", "setting", "settings",
-
-            "config file", "environment variable", "chunk size",
-
-            "overlap",
-
-        )):
-
-            return "configuration"
-
-
-
-        if any(term in normalized for term in (
-
-            "version", "release", "history", "changelog", "roadmap",
-
-            "previously", "what did", "added in", "introduced in",
-
-            "changed in",
-
-        )):
-
-            return "history"
-
-
-
-        if any(term in normalized for term in (
-
-            "documentation", "docs", "guide", "guidance", "workflow",
-
-            "recommended workflow", "instructions", "readme",
-
-        )):
-
-            return "documentation"
-
-
-
-        if any(term in normalized for term in (
-
-            "class", "method", "function", "script", "code",
-
-            "implementation", "member", "property", "field",
-
-            "parameter", "argument", "returns", "calls",
-
-            "invokes", "instantiates", "mapping entries",
-
-            "remove", "delete", "validate the source audio",
-
-            "before cutting",
-
-        )):
-
-            return "code"
-
-
-
-        return "general"
-
-
+        return QueryIntentDetector.detect(query)
 
     @classmethod
 
