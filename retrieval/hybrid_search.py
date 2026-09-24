@@ -24,6 +24,7 @@ class HybridSearch:
 
     DEFAULT_RETRIEVAL_LIMIT = 100
     DEFAULT_RRF_CANDIDATE_LIMIT = 75
+    DEFAULT_CONTEXT_WINDOW = 1
 
     def __init__(self):
         self.dense = SemanticSearch()
@@ -213,7 +214,93 @@ class HybridSearch:
             limit=limit,
         )
 
-        return reranked
+        return self._expand_context(
+            reranked,
+            window=self.DEFAULT_CONTEXT_WINDOW,
+        )
+
+    def _expand_context(
+        self,
+        results,
+        window=DEFAULT_CONTEXT_WINDOW,
+    ):
+        if not results or window <= 0:
+            return results
+
+        for item in results:
+            payload = item.get("payload") or {}
+
+            source = payload.get("source")
+            file_hash = payload.get("file_hash")
+            chunk_index = payload.get("chunk_index")
+            anchor_text = payload.get("text") or ""
+
+            if (
+                not source
+                or not file_hash
+                or chunk_index is None
+            ):
+                item["context_window"] = 0
+                item["context_chunks"] = [
+                    {
+                        "chunk_index": chunk_index,
+                        "role": "anchor",
+                        "text": anchor_text,
+                    }
+                ]
+                item["expanded_context"] = anchor_text
+                continue
+
+            neighbors = self.dense.store.get_adjacent_chunks(
+                source=source,
+                file_hash=file_hash,
+                chunk_index=chunk_index,
+                window=window,
+            )
+
+            context_chunks = [
+                {
+                    "chunk_index": int(chunk_index),
+                    "role": "anchor",
+                    "text": anchor_text,
+                }
+            ]
+
+            for neighbor in neighbors:
+                neighbor_index = int(
+                    neighbor["chunk_index"]
+                )
+                role = (
+                    "before"
+                    if neighbor_index < int(chunk_index)
+                    else "after"
+                )
+
+                context_chunks.append(
+                    {
+                        "chunk_index": neighbor_index,
+                        "role": role,
+                        "text": (
+                            neighbor.get("payload") or {}
+                        ).get("text") or "",
+                    }
+                )
+
+            context_chunks.sort(
+                key=lambda chunk: chunk["chunk_index"]
+            )
+
+            item["context_window"] = int(window)
+            item["context_chunks"] = context_chunks
+            item["expanded_context"] = (
+                "\n\n".join(
+                    chunk["text"]
+                    for chunk in context_chunks
+                    if chunk["text"]
+                )
+            )
+
+        return results
 
     def close(self):
 

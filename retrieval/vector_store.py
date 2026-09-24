@@ -1,4 +1,4 @@
-﻿from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -162,6 +162,74 @@ class VectorStore:
             offset = next_offset
 
         return sources
+
+    def get_adjacent_chunks(
+        self,
+        source,
+        file_hash,
+        chunk_index,
+        window=1,
+    ):
+        """Return nearby chunks from the same indexed source."""
+
+        if (
+            not source
+            or not file_hash
+            or chunk_index is None
+            or window <= 0
+        ):
+            return []
+
+        points, _ = self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=self.build_filter(
+                source=source,
+                file_hash=file_hash,
+            ),
+            limit=1000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        if not points:
+            return []
+
+        lower = int(chunk_index) - int(window)
+        upper = int(chunk_index) + int(window)
+
+        neighbors = []
+
+        for point in points:
+            payload = point.payload or {}
+            index = payload.get("chunk_index")
+
+            if index is None:
+                continue
+
+            try:
+                index = int(index)
+            except (TypeError, ValueError):
+                continue
+
+            if index < lower or index > upper:
+                continue
+
+            if index == int(chunk_index):
+                continue
+
+            neighbors.append(
+                {
+                    "id": point.id,
+                    "payload": payload,
+                    "chunk_index": index,
+                }
+            )
+
+        neighbors.sort(
+            key=lambda item: item["chunk_index"]
+        )
+
+        return neighbors
 
     def upsert(
         self,
