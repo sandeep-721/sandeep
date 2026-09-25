@@ -25,3 +25,5 @@ dist/
 universal_rag.egg-info/
 
 config/llm.json
+
+build/
