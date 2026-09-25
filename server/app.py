@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import os
 import secrets
 
@@ -370,6 +370,23 @@ def ask(
         "answer": result.get("answer", ""),
         "sources": result.get("sources", []),
         "results": result.get("results", []),
+        "evidence_packet": result.get(
+            "evidence_packet",
+            None,
+        ),
+        "verification": result.get(
+            "verification",
+            None,
+        ),
+        "repair": result.get(
+            "repair",
+            {
+                "attempts": 0,
+                "performed": False,
+                "used": False,
+                "added_results": 0,
+            },
+        ),
         "model": {
             "provider": config.provider,
             "model": config.model,
