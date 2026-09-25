@@ -38,6 +38,77 @@ class RAG:
         self.candidate_limit = candidate_limit
         self.result_limit = result_limit
 
+    MAX_REPAIR_ATTEMPTS = 1
+
+    @staticmethod
+    def _result_key(result):
+        payload = result.get("payload", {})
+
+        return (
+            result.get("id"),
+            payload.get("source"),
+            payload.get("file_hash"),
+            payload.get("chunk_index"),
+            payload.get("chunk_start"),
+            payload.get("chunk_end"),
+        )
+
+    @classmethod
+    def _merge_results(cls, primary, repaired):
+        merged = []
+        seen = set()
+
+        for result in [*primary, *repaired]:
+            key = cls._result_key(result)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            merged.append(result)
+
+        return merged
+
+    @staticmethod
+    def _verification_quality(verification):
+        defect_count = (
+            len(verification.invalid_citations)
+            + len(verification.uncited_claims)
+            + len(verification.weak_support)
+        )
+
+        return (
+            1 if verification.verified else 0,
+            verification.citation_coverage,
+            -defect_count,
+        )
+
+    @staticmethod
+    def _build_repair_query(question, verification):
+        claim_ids = set(
+            verification.uncited_claims
+        ) | set(
+            verification.weak_support
+        )
+
+        claims = [
+            claim.text
+            for claim in verification.claims
+            if claim.claim_id in claim_ids
+        ]
+
+        if not claims:
+            return question
+
+        return (
+            f"{question}\n\n"
+            "Additional evidence retrieval focus:\n"
+            + "\n".join(
+                f"- {claim}"
+                for claim in claims
+            )
+        )
+
     def ask(self, question, project=None):
         search_kwargs = {
             "query": question,
@@ -154,12 +225,140 @@ class RAG:
             evidence_packet,
         )
 
+        repair_metadata = {
+            "attempts": 0,
+            "performed": False,
+            "used": False,
+            "added_results": 0,
+        }
+
+        if (
+            not verification.verified
+            and self.MAX_REPAIR_ATTEMPTS > 0
+        ):
+            repair_metadata["attempts"] = 1
+
+            repair_query = self._build_repair_query(
+                question,
+                verification,
+            )
+
+            repair_search_kwargs = dict(
+                search_kwargs
+            )
+
+            repair_search_kwargs["query"] = (
+                repair_query
+            )
+
+            repair_search_kwargs["candidate_limit"] = max(
+                self.candidate_limit * 2,
+                self.result_limit * 4,
+            )
+
+            repair_search_kwargs["limit"] = max(
+                self.result_limit * 2,
+                16,
+            )
+
+            repaired_results = self.search.search(
+                **repair_search_kwargs
+            )
+
+            merged_results = self._merge_results(
+                results,
+                repaired_results,
+            )
+
+            added_results = (
+                len(merged_results) - len(results)
+            )
+
+            repair_metadata["added_results"] = (
+                added_results
+            )
+
+            if added_results > 0:
+                repair_metadata["performed"] = True
+
+                repaired_packet = (
+                    self.context_builder.build_packet(
+                        merged_results,
+                        query=question,
+                    )
+                )
+
+                repaired_prompt = (
+                    "The previous draft was not fully "
+                    "grounded in the available evidence. "
+                    "Answer the user's question again using "
+                    "ONLY the evidence blocks below.\n\n"
+                    "GROUNDING REPAIR RULES:\n"
+                    "1. Every substantive technical claim "
+                    "must have a valid evidence reference.\n"
+                    "2. Use only evidence that explicitly "
+                    "supports the claim.\n"
+                    "3. Never invent evidence IDs.\n"
+                    "4. Do not preserve an unsupported claim "
+                    "just because it appeared in the previous "
+                    "draft.\n"
+                    "5. If the evidence does not establish a "
+                    "fact, say exactly: "
+                    "\"The indexed project evidence does "
+                    "not confirm this.\"\n\n"
+                    "EVIDENCE BLOCKS:\n"
+                    f"{repaired_packet.text}\n\n"
+                    "USER QUESTION:\n"
+                    f"{question}\n\n"
+                    "Write a concise technical answer with "
+                    "inline evidence references."
+                )
+
+                repaired_answer = (
+                    self.llm.generate(
+                        prompt=repaired_prompt,
+                        max_new_tokens=128,
+                        temperature=0.05,
+                    )
+                    .rstrip()
+                )
+
+                repaired_verification = (
+                    self.claim_verifier.verify(
+                        repaired_answer,
+                        repaired_packet,
+                    )
+                )
+
+                if (
+                    self._verification_quality(
+                        repaired_verification
+                    )
+                    > self._verification_quality(
+                        verification
+                    )
+                ):
+                    final_answer = repaired_answer
+                    verification = (
+                        repaired_verification
+                    )
+                    results = merged_results
+                    evidence_packet = repaired_packet
+                    sources = [
+                        source.to_dict()
+                        for source in (
+                            evidence_packet.sources
+                        )
+                    ]
+                    repair_metadata["used"] = True
+
         return {
             "answer": final_answer,
             "sources": sources,
             "results": results,
             "evidence_packet": evidence_packet.to_dict(),
             "verification": verification.to_dict(),
+            "repair": repair_metadata,
         }
 
     def close(self):

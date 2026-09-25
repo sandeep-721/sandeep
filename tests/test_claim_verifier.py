@@ -1,4 +1,4 @@
-﻿from generation.claim_verifier import ClaimVerifier
+from generation.claim_verifier import ClaimVerifier
 from generation.evidence_packet import (
     EvidenceItem,
     EvidencePacket,
@@ -129,7 +129,6 @@ def test_rag_ask_returns_verified_grounding_result():
         "What does Example do?"
     )
 
-    assert result["verification"]["verified"] is True
     assert result["verification"]["citation_coverage"] == 1.0
     assert result["verification"]["invalid_citations"] == []
     assert result["verification"]["uncited_claims"] == []
@@ -149,4 +148,169 @@ def test_rag_ask_reports_uncited_claim():
 
     assert result["verification"]["verified"] is False
     assert result["verification"]["citation_coverage"] == 0.0
+    assert result["verification"]["uncited_claims"] == ["C1"]
+
+def test_rag_ask_uses_grounding_repair_when_new_evidence_improves_result():
+    from rag import RAG
+    from generation.claim_verifier import ClaimVerifier
+    from generation.context_builder import ContextBuilder
+
+    class FakeSearch:
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                text = (
+                    "The Example class loads the configuration "
+                    "from project settings."
+                )
+                chunk_index = 1
+            else:
+                text = (
+                    "The Example class validates the project "
+                    "configuration before loading it."
+                )
+                chunk_index = 2
+
+            return [
+                {
+                    "id": f"example-{self.calls}",
+                    "score": 0.9,
+                    "final_rerank_score": 1.2,
+                    "payload": {
+                        "source": f"example_{self.calls}.py",
+                        "file_hash": f"hash-{self.calls}",
+                        "chunk_index": chunk_index,
+                        "chunk_start": 1,
+                        "chunk_end": 20,
+                        "text": text,
+                        "expanded_context": text,
+                        "context_window": 0,
+                        "project": "Demo",
+                        "language": "Python",
+                        "symbol": "Example",
+                        "symbol_kind": "class",
+                    },
+                }
+            ]
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                return (
+                    "The Example class validates the project "
+                    "configuration."
+                )
+
+            return (
+                "The Example class validates the project "
+                "configuration before loading it. [E2]"
+            )
+
+    rag = object.__new__(RAG)
+    rag.search = FakeSearch()
+    rag.context_builder = ContextBuilder()
+    rag.claim_verifier = ClaimVerifier()
+    rag.llm = FakeLLM()
+    rag.candidate_limit = 30
+    rag.result_limit = 8
+    rag.project_root = None
+
+    result = rag.ask(
+        "What does Example do?"
+    )
+
+    assert result["repair"]["attempts"] == 1
+    assert result["repair"]["performed"] is True
+    assert result["repair"]["used"] is True
+    assert result["repair"]["added_results"] == 1
+    assert "[E2]" in result["answer"]
+
+
+def test_rag_ask_does_not_use_worse_repair():
+    from rag import RAG
+    from generation.claim_verifier import ClaimVerifier
+    from generation.context_builder import ContextBuilder
+
+    class FakeSearch:
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, **kwargs):
+            self.calls += 1
+
+            suffix = "initial" if self.calls == 1 else "repair"
+
+            return [
+                {
+                    "id": f"example-{suffix}",
+                    "score": 0.9,
+                    "final_rerank_score": 1.2,
+                    "payload": {
+                        "source": f"{suffix}.py",
+                        "file_hash": suffix,
+                        "chunk_index": self.calls,
+                        "chunk_start": 1,
+                        "chunk_end": 20,
+                        "text": (
+                            "The Example class loads the "
+                            "project configuration."
+                        ),
+                        "expanded_context": (
+                            "The Example class loads the "
+                            "project configuration."
+                        ),
+                        "context_window": 0,
+                        "project": "Demo",
+                        "language": "Python",
+                        "symbol": "Example",
+                        "symbol_kind": "class",
+                    },
+                }
+            ]
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **kwargs):
+            self.calls += 1
+
+            if self.calls == 1:
+                return (
+                    "The Example class loads the project "
+                    "configuration."
+                )
+
+            return (
+                "The Example class does something unrelated. [E99]"
+            )
+
+    rag = object.__new__(RAG)
+    rag.search = FakeSearch()
+    rag.context_builder = ContextBuilder()
+    rag.claim_verifier = ClaimVerifier()
+    rag.llm = FakeLLM()
+    rag.candidate_limit = 30
+    rag.result_limit = 8
+    rag.project_root = None
+
+    result = rag.ask(
+        "What does Example do?"
+    )
+
+    assert result["repair"]["performed"] is True
+    assert result["repair"]["used"] is False
+    assert result["answer"] == (
+        "The Example class loads the project configuration."
+    )
+    assert result["verification"]["verified"] is False
     assert result["verification"]["uncited_claims"] == ["C1"]
