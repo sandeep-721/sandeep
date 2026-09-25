@@ -6,6 +6,7 @@ from pathlib import Path
 
 from retrieval.hybrid_search import HybridSearch
 from generation.context_builder import ContextBuilder
+from generation.claim_verifier import ClaimVerifier
 from generation.provider_manager import LLMProviderManager
 from retrieval.vector_store import VectorStore
 
@@ -29,6 +30,8 @@ class RAG:
         self.context_builder = ContextBuilder(
             max_chars=max_context_chars
         )
+
+        self.claim_verifier = ClaimVerifier()
 
         self.llm = LLMProviderManager()
 
@@ -84,6 +87,7 @@ class RAG:
                 "sources": [],
                 "results": [],
                 "evidence_packet": evidence_packet.to_dict(),
+                "verification": None,
             }
 
         prompt = (
@@ -143,11 +147,19 @@ class RAG:
             temperature=0.05,
         )
 
+        final_answer = answer.rstrip()
+
+        verification = self.claim_verifier.verify(
+            final_answer,
+            evidence_packet,
+        )
+
         return {
-            "answer": answer.rstrip(),
+            "answer": final_answer,
             "sources": sources,
             "results": results,
             "evidence_packet": evidence_packet.to_dict(),
+            "verification": verification.to_dict(),
         }
 
     def close(self):
